@@ -1,0 +1,126 @@
+import numpy as np
+from PIL import Image, ImageTk
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import random
+import os
+
+# Параметры
+image_data = []  # Хранение данных изображений
+canvas = None  # Canvas для отображения
+current_flat_mosaic = None  # Хранение текущей мозаики для отображения
+canvas_width = 640  # Ширина холста
+canvas_height = 480  # Высота холста
+update_interval = 100  # Интервал обновления в миллисекундах
+is_running = False  # Флаг, указывающий, запущена ли анимация
+
+def load_images():
+    global image_data
+    file_paths = filedialog.askopenfilenames(filetypes=[("Image files", "*.jpg;*.png;*.jpeg")])
+    if file_paths:
+        for fp in file_paths:
+            img = np.array(Image.open(fp).resize((canvas_width, canvas_height)).convert("RGB"))
+            image_data.append(img)  # Сохраняем изображение в массив
+            image_listbox.insert(tk.END, fp)  # Добавляем путь к изображению на новую строку
+
+def split_image(image, min_blocks=4):
+    height, width, _ = image.shape
+    # Генерация случайных размеров блоков
+    num_blocks = random.randint(min_blocks, max(1, width))  # Случайное количество блоков
+    block_width = width // num_blocks
+    blocks = []
+
+    for i in range(num_blocks):
+        start_x = i * block_width
+        end_x = start_x + block_width if i < num_blocks - 1 else width  # Последний блок берет оставшиеся пиксели
+        block = image[:, start_x:end_x]  # Извлекаем блок
+        blocks.append(block)
+
+    return blocks
+
+def generate_random_mosaic(images):
+    if len(images) == 0:
+        return np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+
+    flat_mosaic = np.zeros((canvas_height, canvas_width, 3), dtype=np.uint8)
+    flat_mosaic_blocks = []
+
+    # Сначала собираем блоки из всех изображений
+    for img in images:
+        blocks = split_image(img)
+        flat_mosaic_blocks.extend(blocks)
+
+    # Перемешиваем блоки
+    random.shuffle(flat_mosaic_blocks)
+
+    # Заполняем новую мозаику из перемешанных блоков
+    idx = 0
+    for block in flat_mosaic_blocks:
+        if idx + block.shape[1] <= flat_mosaic.shape[1]:  # Проверяем, можно ли вставить блок
+            flat_mosaic[:, idx:idx + block.shape[1]] = block
+            idx += block.shape[1]
+        else:
+            break  # Прерываем, если не помещается
+
+    return flat_mosaic
+
+def update_canvas(flat_mosaic):
+    global canvas
+    if canvas is None:
+        canvas_window = tk.Toplevel()
+        canvas = tk.Canvas(canvas_window, width=canvas_width, height=canvas_height)
+        canvas.pack()
+
+    mosaic_image = Image.fromarray(np.uint8(flat_mosaic))
+    mosaic_image_tk = ImageTk.PhotoImage(mosaic_image)
+    canvas.delete('all')
+    canvas.create_image(0, 0, anchor=tk.NW, image=mosaic_image_tk)
+    canvas.image = mosaic_image_tk
+
+def start_mosaic():
+    global is_running
+    if image_data and not is_running:
+        is_running = True
+        run_mosaic_animation()  # Запускаем анимацию
+
+def run_mosaic_animation():
+    global current_flat_mosaic, is_running
+    if is_running:
+        current_flat_mosaic = generate_random_mosaic(image_data)  # Генерируем новую мозаику
+        update_canvas(current_flat_mosaic)  # Обновляем холст с новой мозаикой
+        root.after(update_interval, run_mosaic_animation)  # Запланировать следующую итерацию
+
+def stop_mosaic():
+    global is_running
+    is_running = False
+
+def save_image():
+    global current_flat_mosaic
+    if current_flat_mosaic is not None and current_flat_mosaic.size > 0:
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+        save_path = os.path.join(desktop_path, "mosaic_image.png")
+        mosaic_image = Image.fromarray(np.uint8(current_flat_mosaic))
+        mosaic_image.save(save_path)
+        print(f"Изображение сохранено по: {save_path}")
+
+# Создание основного окна
+root = tk.Tk()
+root.title("Генератор мозаики")
+root.geometry("400x500")
+
+load_image_button = tk.Button(root, text="Загрузить изображения", command=load_images)
+load_image_button.pack()
+
+start_button = tk.Button(root, text="Запустить мозаику", command=start_mosaic)
+start_button.pack()
+
+stop_button = tk.Button(root, text="Остановить мозаику", command=stop_mosaic)
+stop_button.pack()
+
+save_image_button = tk.Button(root, text="Сохранить мозаику", command=save_image)
+save_image_button.pack()
+
+image_listbox = tk.Listbox(root, width=60, height=15)
+image_listbox.pack()
+
+root.mainloop()
